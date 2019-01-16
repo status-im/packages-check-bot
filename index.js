@@ -2,6 +2,8 @@
 // See: https://developer.github.com/v3/checks/ to learn more
 const pendingChecks = []
 
+const Humanize = require('humanize-plus')
+
 module.exports = app => {
   app.on(['check_suite.requested'], checkSuiteRequested)
   app.on(['check_run.rerequested'], checkRunRerequested)
@@ -83,6 +85,8 @@ async function queueCheckAsync(context, check_suite) {
     context.log.debug(`compare commits status: ${compareResponse.status}, ${compareResponse.data.files.length} file(s)`)
 
     let check = pendingChecks[head_sha]
+    let checkedDepCount = 0
+    let packageJsonFilenames = []
     const packageFilenameRegex = /^package\.json(.orig)?$/g
   
     check.output.annotations = undefined
@@ -91,7 +95,8 @@ async function queueCheckAsync(context, check_suite) {
       case 'added':
       case 'modified':
         if (packageFilenameRegex.test(file.filename)) {
-          await checkPackageFileAsync(check, context, file, head_sha)
+          packageJsonFilenames.push(file.filename)
+          checkedDepCount += await checkPackageFileAsync(check, context, file, head_sha)
         }
         break
       }
@@ -108,23 +113,40 @@ async function queueCheckAsync(context, check_suite) {
       check.output.summary = 'All dependencies are good!'
     } else {
       check.conclusion = 'failure'
-      check.output.summary = `${check.output.annotations.length} errors/warnings need your attention!`
+
+      const warnings = check.output.annotations.filter(a => a.annotation_level === 'warning').length
+      const failures = check.output.annotations.filter(a => a.annotation_level === 'failure').length
+      const uniqueProblemDependencies = [...new Set(check.output.annotations.map(a => a.dependency))]
+      check.output.summary = `Checked ${checkedDepCount} ${Humanize.pluralize(checkedDepCount, 'dependency', 'dependencies')} in ${Humanize.oxford(packageJsonFilenames.map(f => `\`${f}\``), 3)}.
+${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure')}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(warnings, 'warning')} in ${Humanize.oxford(uniqueProblemDependencies.map(f => `\`${f}\``), 3)} need your attention!`
     }
   
-    const updateResponse = await context.github.checks.update({
-      owner: check.owner,
-      repo: check.repo,
-      check_run_id: check.check_run_id,
-      name: check.name,
-      //details_url: check.details_url,
-      external_id: check.external_id,
-      started_at: check.started_at,
-      status: check.status,
-      conclusion: check.conclusion,
-      completed_at: check.completed_at,
-      output: check.output
-    }) // TODO: Handle error
-    context.log.debug(`update checks status: ${updateResponse.status}`)
+    // Remove helper data from annotation objects
+    const annotations = check.output.annotations
+    for (const annotation of annotations) {
+      delete annotation['dependency']
+    }
+
+    for (let annotationIndex = 0; annotationIndex < annotations.length; annotationIndex += 50) {
+      const annotationsSlice = annotations.length > 50 ? annotations.slice(annotationIndex, annotationIndex + 50) : annotations
+      check.output.annotations = annotationsSlice
+      
+      const updateResponse = await context.github.checks.update({
+        owner: check.owner,
+        repo: check.repo,
+        check_run_id: check.check_run_id,
+        name: check.name,
+        //details_url: check.details_url,
+        external_id: check.external_id,
+        started_at: check.started_at,
+        status: check.status,
+        conclusion: check.conclusion,
+        completed_at: check.completed_at,
+        output: check.output
+      }) // TODO: Handle error
+      context.log.debug(`update checks status: ${updateResponse.status}`)
+    }
+    check.output.annotations = annotations
     delete pendingChecks[head_sha]
   } catch (error) {
     context.log.error(error)
@@ -144,22 +166,28 @@ async function checkPackageFileAsync(check, context, file, head_sha) {
 
   const contents = Buffer.from(contentsResponse.data.content, 'base64').toString('utf8')
   const contentsJSON = JSON.parse(contents)
+  let dependencyCount = 0
 
-  checkDependencies(contents, contentsJSON.dependencies, file, check)
-  checkDependencies(contents, contentsJSON.devDependencies, file, check)
-  checkDependencies(contents, contentsJSON.optionalDependencies, file, check)
+  dependencyCount += checkDependencies(contents, contentsJSON.dependencies, file, check)
+  dependencyCount += checkDependencies(contents, contentsJSON.devDependencies, file, check)
+  dependencyCount += checkDependencies(contents, contentsJSON.optionalDependencies, file, check)
+
+  return dependencyCount
 }
 
 function checkDependencies(contents, dependencies, file, check) {
   if (!dependencies) {
-    return
+    return 0
   }
 
   const urlRegex = /^(http:\/\/|https:\/\/|git\+http:\/\/|git\+https:\/\/|ssh:\/\/|git\+ssh:\/\/|github:)([a-zA-Z0-9_\-./]+)(#(.*))?$/gm
   const requiredProtocol = 'git+https://'
+  let dependencyCount = 0
 
   for (const dependency in dependencies) {
     if (dependencies.hasOwnProperty(dependency)) {
+      ++dependencyCount
+
       const url = dependencies[dependency]
       const match = urlRegex.exec(url)
 
@@ -174,35 +202,43 @@ function checkDependencies(contents, dependencies, file, check) {
       const optimalTag = isTag(tag) ? tag : '#<release-tag>'
       const suggestedUrl = `${requiredProtocol}${optimalAddress}${optimalTag}`
 
+      const annotationSource = {
+        check: check,
+        dependency: dependency,
+        file: file,
+        line: line
+      }
       if (protocol !== requiredProtocol) {
-        createAnnotation(check, file, line, suggestedUrl, {
+        createAnnotation(annotationSource, suggestedUrl, {
           annotation_level: 'warning',
           title: `Found protocol ${protocol} being used in dependency`,
-          message: `Protocol should be ${requiredProtocol}`
+          message: `Protocol should be ${requiredProtocol}.`
         })
       }
       if (protocol !== 'github:' && !address.endsWith('.git')) {
-        createAnnotation(check, file, line, suggestedUrl, {
+        createAnnotation(annotationSource, suggestedUrl, {
           annotation_level: 'warning',
           title: 'Address should end with .git for consistency.',
-          message: 'Android builds have been known to fail when dependency addresses don\'t end with .git'
+          message: 'Android builds have been known to fail when dependency addresses don\'t end with .git.'
         })
       }
       if (!tag) {
-        createAnnotation(check, file, line, suggestedUrl, {
-          annotation_level: 'warning',
+        createAnnotation(annotationSource, suggestedUrl, {
+          annotation_level: 'failure',
           title: 'Dependency is not locked with a tag/release.',
-          message: `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future`
+          message: `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
         })
       } else if (!isTag(tag)) {
-        createAnnotation(check, file, line, suggestedUrl, {
-          annotation_level: 'warning',
+        createAnnotation(annotationSource, suggestedUrl, {
+          annotation_level: 'failure',
           title: 'Dependency is locked with a branch, instead of a tag/release.',
-          message: `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future`
+          message: `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
         })
       }
     }
   }
+
+  return dependencyCount
 }
 
 function findLineColumn (contents, index) {
@@ -220,13 +256,16 @@ function findLineColumn (contents, index) {
   return { line, col }
 }
 
-function createAnnotation(check, file, line, suggestedUrl, annotation) {
+function createAnnotation(annotationSource, suggestedUrl, annotation) {
+  const { check, dependency, file, line } = annotationSource
+
   if (!check.output.annotations) {
     check.output.annotations = []
   }
   annotation.message = annotation.message.concat(`\r\n\r\nSuggested URL: ${suggestedUrl}`)
   check.output.annotations.push({
     ...annotation,
+    dependency: dependency,
     path: file.filename,
     start_line: line,
     end_line: line,
