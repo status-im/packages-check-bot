@@ -84,54 +84,50 @@ Pull requests: ${Humanize.oxford(checkSuite.pull_requests.map(pr => pr.url), 5)}
 
 const timeout = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+class FileItem {
+  filename!: string
+  status!: string
+
+  constructor (filename: string, status: string) {
+    this.filename = filename
+    this.status = status
+  }
+}
+
 async function queueCheckAsync (context: Context, checkSuite: Octokit.ChecksCreateSuiteResponse) {
   try {
-    const { before, head_sha } = checkSuite
+    const { before, head_sha: headSHA } = checkSuite
 
-    const compareResponse = await context.github.repos.compareCommits(context.repo({
-      base: before,
-      head: head_sha
-    }))
-    context.log.debug(`compare commits status: ${compareResponse.status}, ${compareResponse.data.files.length} file(s)`)
+    let files: FileItem[] = await getFilesToBeAnalyzedAsync(context, checkSuite)
 
-    let check = pendingChecks[head_sha]
-    let checkedDepCount = 0
-    let packageJsonFilenames = []
+    context.log.info(`Starting analysis of ${files.length} files (before: ${before}, head: ${headSHA})`)
+
+    let check = pendingChecks[headSHA]
     const packageFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
 
+    if (!check.output) {
+      const output: Octokit.ChecksUpdateParamsOutput = {
+        summary: ''
+      }
+      check.output = output
+    }
     check.output.annotations = undefined
+
     let analysisResult = new AnalysisResult()
 
-    for (const file of compareResponse.data.files) {
+    for (const file of files) {
       switch (file.status) {
         case 'added':
         case 'modified':
           if (packageFilenameRegex.test(file.filename)) {
-            packageJsonFilenames.push(file.filename)
-            checkedDepCount += await checkPackageFileAsync(analysisResult, context, file.filename, head_sha)
+            analysisResult.addPackageJSONFilename(file.filename)
+            await checkPackageFileAsync(analysisResult, context, file.filename, headSHA)
           }
           break
       }
     }
 
-    check.status = 'completed'
-    check.completed_at = (new Date()).toISOString()
-
-    if (analysisResult.checkedDependencyCount === 0) {
-      check.conclusion = 'neutral'
-      check.output.summary = 'No changes to dependencies'
-    } else if (analysisResult.annotations.length === 0) {
-      check.conclusion = 'success'
-      check.output.summary = 'All dependencies are good!'
-    } else {
-      check.conclusion = 'failure'
-
-      const warnings = analysisResult.annotations.filter(a => a.annotationLevel === 'warning').length
-      const failures = analysisResult.annotations.filter(a => a.annotationLevel === 'failure').length
-      const uniqueProblemDependencies = [...new Set(analysisResult.annotations.map(a => a.dependency.name))]
-      check.output.summary = `Checked ${checkedDepCount} ${Humanize.pluralize(checkedDepCount, 'dependency', 'dependencies')} in ${Humanize.oxford(packageJsonFilenames.map(f => `\`${f}\``), 3)}.
-${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure')}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(warnings, 'warning')} in ${Humanize.oxford(uniqueProblemDependencies.map(f => `\`${f}\``), 3)} need your attention!`
-    }
+    prepareCheckRunUpdate(check, analysisResult)
 
     if (analysisResult.annotations.length === 0) {
       await updateRunAsync(context, check)
@@ -139,18 +135,72 @@ ${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure'
       for (let annotationIndex = 0; annotationIndex < analysisResult.annotations.length; annotationIndex += 50) {
         const annotationsSlice = analysisResult.annotations.length > 50 ? analysisResult.annotations.slice(annotationIndex, annotationIndex + 50) : analysisResult.annotations
 
-        convertAnnotationResults(check, annotationsSlice)
+        check.output.annotations = convertAnnotationResults(check, annotationsSlice)
         await updateRunAsync(context, check)
       }
     }
-    delete pendingChecks[head_sha]
+    delete pendingChecks[headSHA]
   } catch (error) {
     context.log.error(error)
     // This function isn't usually awaited for, so there's no point in rethrowing
   }
 }
 
-async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParams) {
+async function getFilesToBeAnalyzedAsync (context: Context, checkSuite: Octokit.ChecksCreateSuiteResponse): Promise<FileItem[]> {
+  let files: FileItem[] = []
+
+  try {
+    if (checkSuite.before === '0000000000000000000000000000000000000000') {
+      const getCommitResponse = await context.github.repos.getCommit(context.repo({
+        sha: checkSuite.head_sha
+      }))
+      context.log.debug(`get commit status: ${getCommitResponse.status}, ${getCommitResponse.data.files.length} file(s)`)
+
+      files = getCommitResponse.data.files.map((f: Octokit.ReposGetCommitResponseFilesItem) => new FileItem(f.filename, f.status))
+    } else {
+      const compareResponse = await context.github.repos.compareCommits(context.repo({
+        base: checkSuite.before,
+        head: checkSuite.head_sha
+      }))
+      context.log.debug(`compare commits status: ${compareResponse.status}, ${compareResponse.data.files.length} file(s)`)
+
+      files = compareResponse.data.files.map((f: any) => new FileItem(f.filename, f.status))
+    }
+  } catch (error) {
+    context.log.error(error)
+  }
+
+  return files
+}
+
+function prepareCheckRunUpdate (check: Octokit.ChecksUpdateParams, analysisResult: AnalysisResult) {
+  check.status = 'completed'
+  check.completed_at = (new Date()).toISOString()
+
+  if (analysisResult.checkedDependencyCount === 0) {
+    check.conclusion = 'neutral'
+    if (check.output) {
+      check.output.summary = 'No changes to dependencies'
+    }
+  } else if (analysisResult.annotations.length === 0) {
+    check.conclusion = 'success'
+    if (check.output) {
+      check.output.summary = 'All dependencies are good!'
+    }
+  } else {
+    check.conclusion = 'failure'
+
+    if (check.output) {
+      const warnings = analysisResult.annotations.filter(a => a.annotationLevel === 'warning').length
+      const failures = analysisResult.annotations.filter(a => a.annotationLevel === 'failure').length
+      const uniqueProblemDependencies = [...new Set(analysisResult.annotations.map(a => a.dependency.name))]
+      check.output.summary = `Checked ${analysisResult.checkedDependencyCount} ${Humanize.pluralize(analysisResult.checkedDependencyCount, 'dependency', 'dependencies')} in ${Humanize.oxford(analysisResult.packageJsonFilenames.map(f => `\`${f}\``), 3)}.
+${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure')}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(warnings, 'warning')} in ${Humanize.oxford(uniqueProblemDependencies.map(f => `\`${f}\``), 3)} need your attention!`
+    }
+  }
+}
+
+async function updateRunAsync (context: Context, check: Octokit.ChecksUpdateParams) {
   for (let attempts = 3; attempts >= 0;) {
     try {
       const updateResponse = await context.github.checks.update({
@@ -194,19 +244,11 @@ async function checkPackageFileAsync (analysisResult: AnalysisResult, context: C
   await checkDependenciesAsync(context, contents, getDependenciesFromJSON(contentsJSON.dependencies), filename, analysisResult)
   await checkDependenciesAsync(context, contents, getDependenciesFromJSON(contentsJSON.devDependencies), filename, analysisResult)
   await checkDependenciesAsync(context, contents, getDependenciesFromJSON(contentsJSON.optionalDependencies), filename, analysisResult)
-
-  return analysisResult.checkedDependencyCount
 }
 
-function convertAnnotationResults (check: Octokit.ChecksUpdateParams, annotationsSlice: AnnotationResult[]) {
-  if (!check.output) {
-    const output: Octokit.ChecksUpdateParamsOutput = {
-      summary: ''
-    }
-    check.output = output
-  }
+function convertAnnotationResults (check: Octokit.ChecksUpdateParams, annotationsSlice: AnnotationResult[]): Octokit.ChecksUpdateParamsOutputAnnotations[] {
+  let annotations: Octokit.ChecksUpdateParamsOutputAnnotations[] = []
 
-  check.output.annotations = []
   for (const annotationResult of annotationsSlice) {
     const annotation: Octokit.ChecksUpdateParamsOutputAnnotations = {
       path: annotationResult.path,
@@ -217,6 +259,8 @@ function convertAnnotationResults (check: Octokit.ChecksUpdateParams, annotation
       title: annotationResult.title,
       raw_details: annotationResult.rawDetails
     }
-    check.output.annotations.push(annotation)
+    annotations.push(annotation)
   }
+
+  return annotations
 }

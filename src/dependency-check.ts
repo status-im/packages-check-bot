@@ -99,11 +99,16 @@ export class AnnotationResult {
 
 export class AnalysisResult {
   checkedDependencyCount!: number
+  packageJsonFilenames: string[] = []
   annotations!: AnnotationResult[]
 
   constructor () {
     this.checkedDependencyCount = 0
     this.annotations = []
+  }
+
+  addPackageJSONFilename (packageFilename: string) {
+    this.packageJsonFilenames.push(packageFilename)
   }
 }
 
@@ -118,8 +123,8 @@ export class Dependency {
 }
 
 type annotationSource = {
-  dependency: Dependency,
-  filename: string,
+  dependency: Dependency
+  filename: string
   line: number
 }
 
