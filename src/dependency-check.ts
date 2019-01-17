@@ -1,3 +1,73 @@
+import { Context } from 'probot/lib/context'
+
+export function getDependenciesFromJSON (dependenciesJSON: any): Dependency[] {
+  const dependencies: Dependency[] = []
+
+  for (const name in dependenciesJSON) {
+    if (dependenciesJSON.hasOwnProperty(name)) {
+      dependencies.push(new Dependency(name, dependenciesJSON[name]))
+    }
+  }
+
+  return dependencies
+}
+
+export async function checkDependenciesAsync (context: Context, contents: string, dependencies: Dependency[], filename: string, result: AnalysisResult) {
+  if (!dependencies || dependencies.length === 0) {
+    return
+  }
+
+  const urlRegex = /^(http:\/\/|https:\/\/|git\+http:\/\/|git\+https:\/\/|ssh:\/\/|git\+ssh:\/\/|github:)([a-zA-Z0-9_\-./]+)(#(.*))?$/gm
+  const requiredProtocol = 'git+https://'
+
+  result.checkedDependencyCount += dependencies.length
+
+  for (const dependency of dependencies) {
+    const url = dependency.url
+    const match = urlRegex.exec(url)
+
+    if (!match) {
+      continue
+    }
+    const protocol = match[1]
+    const address = protocol === 'github:' ? `github.com/${match[2]}` : match[2]
+    const tag = match.length > 4 ? match[4] : ''
+    const { line } = findLineColumn(contents, contents.indexOf(url))
+    const optimalAddress = address.endsWith('.git') ? address : address.concat('.git')
+    const isTag = await isTagAsync(context, address, tag)
+    const optimalTag = isTag ? tag : '#<release-tag>'
+    const suggestedUrl = `${requiredProtocol}${optimalAddress}${optimalTag}`
+
+    const annotationSource: annotationSource = {
+      dependency: dependency,
+      filename: filename,
+      line: line
+    }
+    if (protocol !== requiredProtocol) {
+      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'warning',
+        `Found protocol ${protocol} being used in dependency`,
+        `Protocol should be ${requiredProtocol}.`))
+    }
+    if (protocol !== 'github:' && !address.endsWith('.git')) {
+      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'warning',
+        'Address should end with .git for consistency.',
+        'Android builds have been known to fail when dependency addresses don\'t end with .git.'
+      ))
+    }
+    if (!tag) {
+      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
+        'Dependency is not locked with a tag/release.',
+        `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
+      ))
+    } else if (!isTag) {
+      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
+        'Dependency is locked with a branch, instead of a tag/release.',
+        `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
+      ))
+    }
+  }
+}
+
 export class AnnotationResult {
   title?: string
   message: string
@@ -9,13 +79,13 @@ export class AnnotationResult {
   rawDetails?: string
 
   constructor (title: string,
-              message: string,
-              annotationLevel: "notice" | "warning" | "failure",
-              dependency: Dependency,
-              path: string,
-              startLine: number,
-              endLine: number,
-              rawDetails: string) {
+               message: string,
+               annotationLevel: "notice" | "warning" | "failure",
+               dependency: Dependency,
+               path: string,
+               startLine: number,
+               endLine: number,
+               rawDetails: string) {
     this.title = title
     this.message = message
     this.annotationLevel = annotationLevel
@@ -53,73 +123,6 @@ type annotationSource = {
   line: number
 }
 
-export function getDependenciesFromJSON (dependenciesJSON: any): Dependency[] {
-  const dependencies: Dependency[] = []
-
-  for (const name in dependenciesJSON) {
-    if (dependenciesJSON.hasOwnProperty(name)) {
-      dependencies.push(new Dependency(name, dependenciesJSON[name]))
-    }
-  }
-
-  return dependencies
-}
-
-export function checkDependencies (contents: string, dependencies: Dependency[], filename: string, result: AnalysisResult) {
-  if (!dependencies || dependencies.length === 0) {
-    return
-  }
-
-  const urlRegex = /^(http:\/\/|https:\/\/|git\+http:\/\/|git\+https:\/\/|ssh:\/\/|git\+ssh:\/\/|github:)([a-zA-Z0-9_\-./]+)(#(.*))?$/gm
-  const requiredProtocol = 'git+https://'
-
-  result.checkedDependencyCount += dependencies.length
-
-  for (const dependency of dependencies) {
-    const url = dependency.url
-    const match = urlRegex.exec(url)
-
-    if (!match) {
-      continue
-    }
-    const protocol = match[1]
-    const address = match[2]
-    const tag = match.length > 4 ? match[4] : ''
-    const { line } = findLineColumn(contents, contents.indexOf(url))
-    const optimalAddress = address.endsWith('.git') ? address : address.concat('.git')
-    const optimalTag = isTag(tag) ? tag : '#<release-tag>'
-    const suggestedUrl = `${requiredProtocol}${optimalAddress}${optimalTag}`
-
-    const annotationSource: annotationSource = {
-      dependency: dependency,
-      filename: filename,
-      line: line
-    }
-    if (protocol !== requiredProtocol) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'warning',
-        `Found protocol ${protocol} being used in dependency`,
-        `Protocol should be ${requiredProtocol}.`))
-    }
-    if (protocol !== 'github:' && !address.endsWith('.git')) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'warning',
-        'Address should end with .git for consistency.',
-        'Android builds have been known to fail when dependency addresses don\'t end with .git.'
-      ))
-    }
-    if (!tag) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
-        'Dependency is not locked with a tag/release.',
-        `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
-      ))
-    } else if (!isTag(tag)) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
-        'Dependency is locked with a branch, instead of a tag/release.',
-        `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
-      ))
-    }
-  }
-}
-
 function findLineColumn (contents: string, index: number) {
   const lines = contents.split('\n')
   const line = contents.substr(0, index).split('\n').length
@@ -155,7 +158,25 @@ function createAnnotation (
   )
 }
 
-function isTag (tag: string): boolean {
-  // TODO: We need to check the actual repo to see if it is a branch or a tag
-  return tag !== '' && tag !== 'master' && tag !== 'develop'
+async function isTagAsync (context: Context, address: string, tag: string): Promise<boolean> {
+  if (!tag) {
+    return false
+  }
+
+  // 'github.com/status-im/bignumber.js'
+  const parts = address.split('/')
+  if (parts[0] === 'github.com') {
+    try {
+      const getRefResponse = await context.github.gitdata.getRef({ owner: parts[1], repo: parts[2].replace('.git', ''), ref: `tags/${tag}` })
+      if (getRefResponse.status === 200) {
+        return true
+      }
+    } catch (error) {
+      context.log.error(error)
+      return false
+    }
+  }
+
+  // Educated guess
+  return false
 }

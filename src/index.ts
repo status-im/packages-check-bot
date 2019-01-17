@@ -3,7 +3,7 @@
 import { Application, Context } from 'probot' // eslint-disable-line no-unused-vars
 import Octokit from '@octokit/rest'
 import Humanize from 'humanize-plus'
-import { checkDependencies, getDependenciesFromJSON, AnalysisResult, AnnotationResult } from './dependency-check'
+import { checkDependenciesAsync, getDependenciesFromJSON, AnalysisResult, AnnotationResult } from './dependency-check'
 
 const pendingChecks: any = []
 
@@ -184,9 +184,9 @@ async function checkPackageFileAsync (analysisResult: AnalysisResult, context: C
   const contents = Buffer.from(contentsResponse.data.content, 'base64').toString('utf8')
   const contentsJSON = JSON.parse(contents)
 
-  checkDependencies(contents, getDependenciesFromJSON(contentsJSON.dependencies), filename, analysisResult)
-  checkDependencies(contents, getDependenciesFromJSON(contentsJSON.devDependencies), filename, analysisResult)
-  checkDependencies(contents, getDependenciesFromJSON(contentsJSON.optionalDependencies), filename, analysisResult)
+  await checkDependenciesAsync(context, contents, getDependenciesFromJSON(contentsJSON.dependencies), filename, analysisResult)
+  await checkDependenciesAsync(context, contents, getDependenciesFromJSON(contentsJSON.devDependencies), filename, analysisResult)
+  await checkDependenciesAsync(context, contents, getDependenciesFromJSON(contentsJSON.optionalDependencies), filename, analysisResult)
 
   return analysisResult.checkedDependencyCount
 }
