@@ -97,7 +97,7 @@ async function queueCheckAsync (context: Context, checkSuite: Octokit.ChecksCrea
     let check = pendingChecks[head_sha]
     let checkedDepCount = 0
     let packageJsonFilenames = []
-    const packageFilenameRegex = /^package\.json(.orig)?$/g
+    const packageFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
 
     check.output.annotations = undefined
     let analysisResult = new AnalysisResult()
