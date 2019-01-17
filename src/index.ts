@@ -133,41 +133,48 @@ async function queueCheckAsync (context: Context, checkSuite: Octokit.ChecksCrea
 ${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure')}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(warnings, 'warning')} in ${Humanize.oxford(uniqueProblemDependencies.map(f => `\`${f}\``), 3)} need your attention!`
     }
 
-    for (let annotationIndex = 0; annotationIndex < analysisResult.annotations.length; annotationIndex += 50) {
-      const annotationsSlice = analysisResult.annotations.length > 50 ? analysisResult.annotations.slice(annotationIndex, annotationIndex + 50) : analysisResult.annotations
+    if (analysisResult.annotations.length === 0) {
+      await updateRunAsync(context, check)
+    } else {
+      for (let annotationIndex = 0; annotationIndex < analysisResult.annotations.length; annotationIndex += 50) {
+        const annotationsSlice = analysisResult.annotations.length > 50 ? analysisResult.annotations.slice(annotationIndex, annotationIndex + 50) : analysisResult.annotations
 
-      convertAnnotationResults(check, annotationsSlice)
-
-      for (let attempts = 3; attempts >= 0;) {
-        try {
-          const updateResponse = await context.github.checks.update({
-            owner: check.owner,
-            repo: check.repo,
-            check_run_id: check.check_run_id,
-            name: check.name,
-            //details_url: check.details_url,
-            external_id: check.external_id,
-            started_at: check.started_at,
-            status: check.status,
-            conclusion: check.conclusion,
-            completed_at: check.completed_at,
-            output: check.output
-          })
-          context.log.debug(`update checks status: ${updateResponse.status}`)
-          break
-        } catch (error) {
-          if (--attempts <= 0) {
-            throw error
-          }
-          context.log.warn(`error while updating check run, will try again in 30 seconds: ${error.message}`)
-          await timeout(30000)
-        }
+        convertAnnotationResults(check, annotationsSlice)
+        await updateRunAsync(context, check)
       }
     }
     delete pendingChecks[head_sha]
   } catch (error) {
     context.log.error(error)
     // This function isn't usually awaited for, so there's no point in rethrowing
+  }
+}
+
+async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParams) {
+  for (let attempts = 3; attempts >= 0;) {
+    try {
+      const updateResponse = await context.github.checks.update({
+        owner: check.owner,
+        repo: check.repo,
+        check_run_id: check.check_run_id,
+        name: check.name,
+        //details_url: check.details_url,
+        external_id: check.external_id,
+        started_at: check.started_at,
+        status: check.status,
+        conclusion: check.conclusion,
+        completed_at: check.completed_at,
+        output: check.output
+      })
+      context.log.debug(`update checks status: ${updateResponse.status}`)
+      break
+    } catch (error) {
+      if (--attempts <= 0) {
+        throw error
+      }
+      context.log.warn(`error while updating check run, will try again in 30 seconds: ${error.message}`)
+      await timeout(30000)
+    }
   }
 }
 
