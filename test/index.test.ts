@@ -1,15 +1,18 @@
-const nock = require('nock')
+// You can import your modules
+// import index from '../src/index'
+
+import nock from 'nock'
 // Requiring our app implementation
-const myProbotApp = require('..')
-const { Probot } = require('probot')
+import myProbotApp from '../src'
+import { Probot } from 'probot'
 // Requiring our fixtures
-const checkSuitePayload = require('./fixtures/check_suite.requested')
-const checkRunSuccess = require('./fixtures/check_run.created')
+import checkSuitePayload from './fixtures/check_suite.requested.json'
+import checkRunSuccess from './fixtures/check_run.created.json'
 
 nock.disableNetConnect()
 
 describe('My Probot app', () => {
-  let probot
+  let probot: any
 
   beforeEach(() => {
     probot = new Probot({})
@@ -40,6 +43,9 @@ describe('My Probot app', () => {
 
 // For more information about testing with Jest see:
 // https://facebook.github.io/jest/
+
+// For more information about using TypeScript in your tests, Jest recommends:
+// https://github.com/kulshekhar/ts-jest
 
 // For more information about testing with Nock see:
 // https://github.com/nock/nock

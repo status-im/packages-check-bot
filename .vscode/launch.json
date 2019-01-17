@@ -6,15 +6,11 @@
     "configurations": [
         {
             "type": "node",
-            "request": "launch",
-            "name": "Debug",
-            "program": "${workspaceFolder}/node_modules/probot/bin/probot-run.js",
-            "args": [
-                "${workspaceFolder}/index.js"
-            ],
-            "env": {
-                "DEBUG": "true"
-            }
+            "request": "attach",
+            "name": "Attach to Process",
+            "restart": true,
+            "protocol": "inspector",
+            "port": 9229
         }
     ]
 }
