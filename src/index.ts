@@ -128,7 +128,7 @@ async function queueCheckAsync (context: Context, checkSuite: Octokit.ChecksCrea
 
       const warnings = analysisResult.annotations.filter(a => a.annotationLevel === 'warning').length
       const failures = analysisResult.annotations.filter(a => a.annotationLevel === 'failure').length
-      const uniqueProblemDependencies = [...new Set(analysisResult.annotations.map(a => a.dependency))]
+      const uniqueProblemDependencies = [...new Set(analysisResult.annotations.map(a => a.dependency.name))]
       check.output.summary = `Checked ${checkedDepCount} ${Humanize.pluralize(checkedDepCount, 'dependency', 'dependencies')} in ${Humanize.oxford(packageJsonFilenames.map(f => `\`${f}\``), 3)}.
 ${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure')}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(warnings, 'warning')} in ${Humanize.oxford(uniqueProblemDependencies.map(f => `\`${f}\``), 3)} need your attention!`
     }
