@@ -186,12 +186,14 @@ function prepareCheckRunUpdate (check: Octokit.ChecksUpdateParams, analysisResul
   if (analysisResult.checkedDependencyCount === 0) {
     check.conclusion = 'neutral'
     if (check.output) {
-      check.output.summary = 'No changes to dependencies'
+      check.output.title = 'No changes to dependencies'
+      check.output.summary = 'No changes detected to package.json files'
     }
   } else if (analysisResult.annotations.length === 0) {
     check.conclusion = 'success'
     if (check.output) {
-      check.output.summary = 'All dependencies are good!'
+      check.output.title = 'All dependencies are good!'
+      check.output.summary = `No problems detected in changes to ${Humanize.oxford(analysisResult.packageJsonFilenames.map(f => `\`${f}\``), 3)}`
     }
   } else {
     check.conclusion = 'failure'
@@ -200,6 +202,7 @@ function prepareCheckRunUpdate (check: Octokit.ChecksUpdateParams, analysisResul
       const warnings = analysisResult.annotations.filter(a => a.annotationLevel === 'warning').length
       const failures = analysisResult.annotations.filter(a => a.annotationLevel === 'failure').length
       const uniqueProblemDependencies = [...new Set(analysisResult.annotations.map(a => a.dependency.name))]
+      check.output.title = `${Humanize.boundedNumber(failures + warnings, 10)} ${Humanize.pluralize(failures + warnings, 'problem')} detected`
       check.output.summary = `Checked ${analysisResult.checkedDependencyCount} ${Humanize.pluralize(analysisResult.checkedDependencyCount, 'dependency', 'dependencies')} in ${Humanize.oxford(analysisResult.packageJsonFilenames.map(f => `\`${f}\``), 3)}.
 ${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(failures, 'failure')}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(warnings, 'warning')} in ${Humanize.oxford(uniqueProblemDependencies.map(f => `\`${f}\``), 3)} need your attention!`
     }
