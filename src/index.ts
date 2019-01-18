@@ -27,7 +27,7 @@ export = (app: Application) => {
     })
 
     try {
-      context.log.info(`checking ${context.payload.repository.full_name}#${headBranch} (${headSHA}) (check_suite.id #${checkSuite.id})
+      context.log.info(`checking ${context.payload.repository.html_url}/commits/${checkSuite.head_sha} (check_suite.id #${checkSuite.id})
 Pull requests: ${Humanize.oxford(checkSuite.pull_requests.map(pr => pr.url), 5)}`)
 
       check.status = 'in_progress'
@@ -222,7 +222,7 @@ async function updateRunAsync (context: Context, check: Octokit.ChecksUpdatePara
         completed_at: check.completed_at,
         output: check.output
       })
-      context.log.debug(`update checks status: ${updateResponse.status}`)
+      context.log.info(`HTTP ${updateResponse.status} - Finished updating check run #${check.check_run_id} for ${context.payload.repository.html_url}/commits/${context.payload.check_suite.head_sha}: ${check.status}, ${check.conclusion}`)
       break
     } catch (error) {
       if (--attempts <= 0) {
