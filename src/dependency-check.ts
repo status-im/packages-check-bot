@@ -34,8 +34,8 @@ export async function checkDependenciesAsync (context: Context, contents: string
     const tag = match.length > 4 ? match[4] : ''
     const { line } = findLineColumn(contents, contents.indexOf(url))
     const optimalAddress = address.endsWith('.git') ? address : address.concat('.git')
-    const isTag = await isTagAsync(context, address, tag)
-    const optimalTag = isTag ? tag : '#<release-tag>'
+    const refType = await getRefTypeAsync(context, address, tag)
+    const optimalTag = refType === 'tag' ? tag : '#<release-tag>'
     const suggestedUrl = `${requiredProtocol}${optimalAddress}${optimalTag}`
 
     const annotationSource: annotationSource = {
@@ -59,7 +59,12 @@ export async function checkDependenciesAsync (context: Context, contents: string
         'Dependency is not locked with a tag/release.',
         `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
       ))
-    } else if (!isTag) {
+    } else if (refType === 'unknown') {
+      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
+        `Dependency is locked with an unknown ref-spec (\`${tag}\`).`,
+        `Please check that the tag \`${tag}\` exists in the target repository ${address}.`
+      ))
+    } else if (refType !== 'tag') {
       result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
         'Dependency is locked with a branch, instead of a tag/release.',
         `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
@@ -163,25 +168,38 @@ function createAnnotation (
   )
 }
 
-async function isTagAsync (context: Context, address: string, tag: string): Promise<boolean> {
+async function getRefTypeAsync (context: Context, address: string, tag: string): Promise<'tag' | 'branch' | 'unknown'> {
   if (!tag) {
-    return false
+    return 'branch'
   }
 
   // 'github.com/status-im/bignumber.js'
   const parts = address.split('/')
   if (parts[0] === 'github.com') {
+    // check optimistic case, and see if it is a tag
     try {
       const getRefResponse = await context.github.gitdata.getRef({ owner: parts[1], repo: parts[2].replace('.git', ''), ref: `tags/${tag}` })
       if (getRefResponse.status === 200) {
-        return true
+        return 'tag'
       }
     } catch (error) {
-      context.log.error(error)
-      return false
+      context.log.trace(error)
     }
+
+    // check if it is a branch
+    try {
+      const getRefResponse = await context.github.gitdata.getRef({ owner: parts[1], repo: parts[2].replace('.git', ''), ref: `heads/${tag}` })
+      if (getRefResponse.status === 200) {
+        return 'branch'
+      }
+    } catch (error) {
+      context.log.trace(error)
+    }
+
+    // probably not existing?
+    return 'unknown'
   }
 
   // Educated guess
-  return false
+  return 'branch'
 }
