@@ -9,6 +9,7 @@ const pendingChecks: any = []
 
 export = (app: Application) => {
   app.on(['check_suite.requested'], async (context) => { await checkSuiteAsync(context, context.payload.check_suite) })
+  app.on(['check_suite.completed'], async (context) => { delete pendingChecks[context.payload.check_suite.head_sha] })
   app.on(['check_run.rerequested'], async (context) => {
     const { check_suite } = context.payload.check_run
     await checkSuiteAsync(context, check_suite)
@@ -103,6 +104,11 @@ async function queueCheckAsync (context: Context, checkSuite: Octokit.ChecksCrea
     context.log.info(`Starting analysis of ${files.length} files (before: ${before}, head: ${headSHA})`)
 
     let check = pendingChecks[headSHA]
+    if (!check) {
+      // Check must have been finished by another bot instance, do nothing
+      return
+    }
+
     const packageFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
 
     if (!check.output) {
