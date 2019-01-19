@@ -1,0 +1,34 @@
+{
+    "defaultSeverity": "error",
+    "extends": [
+        "tslint:recommended"
+    ],
+    "jsRules": {},
+    "rules": {
+        "interface-name": false,
+        "no-console": false,
+        "quotemark": [
+            true,
+            "single"
+        ],
+        "prefer-const": true,
+        "semicolon": [
+            true,
+            "never"
+        ],
+        "eofline": true,
+        "no-return-await": true
+    },
+    "compilerOptions": {
+        "plugins": [
+            {
+                "name": "typescript-tslint-plugin",
+                "alwaysShowRuleFailuresAsWarnings": false,
+                "ignoreDefinitionFiles": true,
+                "configFile": "./tslint.json",
+                "suppressWhileTypeErrorsPresent": false,
+                "mockTypeScriptVersion": false
+            }
+        ]
+    }
+}

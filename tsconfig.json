@@ -8,6 +8,7 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": false,
+    "strictNullChecks": true /* Enable strict null checks. */,
     "pretty": true,
     "strict": true,
     "sourceMap": true,

@@ -1,22 +1,33 @@
+import Octokit from '@octokit/rest'
 import { Context } from 'probot/lib/context'
+import { AnalysisResult } from './analysis-result'
+import { AnnotationResult } from './annotation-result'
+import { Dependency } from './dependency'
 
-export function getDependenciesFromJSON (dependenciesJSON: any): Dependency[] {
+export function getDependenciesFromJSON(dependenciesJSON: any): Dependency[] {
   const dependencies: Dependency[] = []
 
   for (const name in dependenciesJSON) {
     if (dependenciesJSON.hasOwnProperty(name)) {
-      dependencies.push(new Dependency(name, dependenciesJSON[name]))
+      dependencies.push({ name, url: dependenciesJSON[name] })
     }
   }
 
   return dependencies
 }
 
-export async function checkDependenciesAsync (context: Context, contents: string, dependencies: Dependency[], filename: string, result: AnalysisResult) {
+export async function checkDependenciesAsync(
+  context: Context,
+  contents: string,
+  dependencies: Dependency[],
+  filename: string,
+  result: AnalysisResult,
+) {
   if (!dependencies || dependencies.length === 0) {
     return
   }
 
+  // tslint:disable-next-line:max-line-length
   const urlRegex = /^(http:\/\/|https:\/\/|git\+http:\/\/|git\+https:\/\/|ssh:\/\/|git\+ssh:\/\/|github:)([a-zA-Z0-9_\-./]+)(#(.*))?$/gm
   const requiredProtocol = 'git+https://'
 
@@ -38,102 +49,48 @@ export async function checkDependenciesAsync (context: Context, contents: string
     const optimalTag = refType === 'tag' ? tag : '#<release-tag>'
     const suggestedUrl = `${requiredProtocol}${optimalAddress}${optimalTag}`
 
-    const annotationSource: annotationSource = {
-      dependency: dependency,
-      filename: filename,
-      line: line
+    const annotation: AnnotationSource = {
+      dependency,
+      filename,
+      line,
+    }
+    const newAnnotation = (level: 'notice' | 'warning' | 'failure', title: string, message: string) => {
+      result.annotations.push(createAnnotation(annotation, suggestedUrl, level, title, message))
     }
     if (protocol !== requiredProtocol) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'warning',
-        `Found protocol ${protocol} being used in dependency`,
-        `Protocol should be ${requiredProtocol}.`))
+      newAnnotation('warning', `Found protocol ${protocol} being used in dependency`,
+                    `Protocol should be ${requiredProtocol}.`)
     }
     if (protocol !== 'github:' && !address.endsWith('.git')) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'warning',
-        'Address should end with .git for consistency.',
-        'Android builds have been known to fail when dependency addresses don\'t end with .git.'
-      ))
+      newAnnotation('warning', 'Address should end with .git for consistency.',
+                    `Android builds have been known to fail when dependency addresses don't end with .git.`,
+      )
     }
     if (!tag) {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
-        'Dependency is not locked with a tag/release.',
-        `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
-      ))
+      newAnnotation('failure', 'Dependency is not locked with a tag/release.',
+                    `${url} is not a deterministic dependency locator.
+If the branch advances, it will be impossible to rebuild the same output in the future.`,
+      )
     } else if (refType === 'unknown') {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
-        `Dependency is locked with an unknown ref-spec (\`${tag}\`).`,
-        `Please check that the tag \`${tag}\` exists in the target repository ${address}.`
-      ))
+      newAnnotation('failure', `Dependency is locked with an unknown ref-spec (\`${tag}\`).`,
+                    `Please check that the tag \`${tag}\` exists in the target repository ${address}.`,
+      )
     } else if (refType !== 'tag') {
-      result.annotations.push(createAnnotation(annotationSource, suggestedUrl, 'failure',
-        'Dependency is locked with a branch, instead of a tag/release.',
-        `${url} is not a deterministic dependency locator.\r\nIf the branch advances, it will be impossible to rebuild the same output in the future.`
-      ))
+      newAnnotation('failure', 'Dependency is locked with a branch instead of a tag/release.',
+                    `${url} is not a deterministic dependency locator.
+If the branch advances, it will be impossible to rebuild the same output in the future.`,
+      )
     }
   }
 }
 
-export class AnnotationResult {
-  title?: string
-  message: string
-  annotationLevel: 'notice' | 'warning' | 'failure'
-  dependency: Dependency
-  path: string
-  startLine: number
-  endLine: number
-  rawDetails?: string
-
-  constructor (title: string,
-               message: string,
-               annotationLevel: "notice" | "warning" | "failure",
-               dependency: Dependency,
-               path: string,
-               startLine: number,
-               endLine: number,
-               rawDetails: string) {
-    this.title = title
-    this.message = message
-    this.annotationLevel = annotationLevel
-    this.dependency = dependency
-    this.path = path
-    this.startLine = startLine
-    this.endLine = endLine
-    this.rawDetails = rawDetails
-  }
-}
-
-export class AnalysisResult {
-  checkedDependencyCount!: number
-  packageJsonFilenames: string[] = []
-  annotations!: AnnotationResult[]
-
-  constructor () {
-    this.checkedDependencyCount = 0
-    this.annotations = []
-  }
-
-  addPackageJSONFilename (packageFilename: string) {
-    this.packageJsonFilenames.push(packageFilename)
-  }
-}
-
-export class Dependency {
-  name!: string
-  url!: string
-
-  constructor (name: string, url: string) {
-    this.name = name
-    this.url = url
-  }
-}
-
-type annotationSource = {
+interface AnnotationSource {
   dependency: Dependency
   filename: string
   line: number
 }
 
-function findLineColumn (contents: string, index: number) {
+function findLineColumn(contents: string, index: number) {
   const lines = contents.split('\n')
   const line = contents.substr(0, index).split('\n').length
 
@@ -148,12 +105,13 @@ function findLineColumn (contents: string, index: number) {
   return { line, col }
 }
 
-function createAnnotation (
-  annotationSource: annotationSource,
+function createAnnotation(
+  annotationSource: AnnotationSource,
   suggestedUrl: string,
-  annotationLevel: "notice" | "warning" | "failure",
+  annotationLevel: 'notice' | 'warning' | 'failure',
   title: string,
-  message: string): AnnotationResult {
+  message: string,
+): AnnotationResult {
   const { dependency, filename, line } = annotationSource
 
   return new AnnotationResult(
@@ -164,11 +122,15 @@ function createAnnotation (
     filename,
     line,
     line,
-    `{suggestedUrl: ${suggestedUrl}}`
+    `{suggestedUrl: ${suggestedUrl}}`,
   )
 }
 
-async function getRefTypeAsync (context: Context, address: string, tag: string): Promise<'tag' | 'branch' | 'unknown'> {
+async function getRefTypeAsync(
+  context: Context,
+  address: string,
+  tag: string,
+): Promise<'tag' | 'branch' | 'unknown'> {
   if (!tag) {
     return 'branch'
   }
@@ -176,22 +138,25 @@ async function getRefTypeAsync (context: Context, address: string, tag: string):
   // 'github.com/status-im/bignumber.js'
   const parts = address.split('/')
   if (parts[0] === 'github.com') {
+    const params: Octokit.GitdataGetRefParams = {
+      owner: parts[1],
+      repo: parts[2].endsWith('.git') ? parts[2].substring(0, parts[2].length - 4) : parts[2],
+
+      ref: '',
+    }
+
     // check optimistic case, and see if it is a tag
     try {
-      const getRefResponse = await context.github.gitdata.getRef({ owner: parts[1], repo: parts[2].replace('.git', ''), ref: `tags/${tag}` })
-      if (getRefResponse.status === 200) {
-        return 'tag'
-      }
+      await context.github.gitdata.getRef({ ...params, ref: `tags/${tag}` })
+      return 'tag'
     } catch (error) {
       context.log.trace(error)
     }
 
     // check if it is a branch
     try {
-      const getRefResponse = await context.github.gitdata.getRef({ owner: parts[1], repo: parts[2].replace('.git', ''), ref: `heads/${tag}` })
-      if (getRefResponse.status === 200) {
-        return 'branch'
-      }
+      await context.github.gitdata.getRef({ ...params, ref: `heads/${tag}` })
+      return 'branch'
     } catch (error) {
       context.log.trace(error)
     }

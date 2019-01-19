@@ -2,12 +2,12 @@
 // import index from '../src/index'
 
 import nock from 'nock'
+import { Probot } from 'probot'
 // Requiring our app implementation
 import myProbotApp from '../src'
-import { Probot } from 'probot'
+import checkRunSuccess from './fixtures/check_run.created.json'
 // Requiring our fixtures
 import checkSuitePayload from './fixtures/check_suite.requested.json'
-import checkRunSuccess from './fixtures/check_run.created.json'
 
 nock.disableNetConnect()
 
@@ -29,8 +29,8 @@ describe('My Probot app', () => {
       .reply(200, { token: 'test' })
 
     nock('https://api.github.com')
-      .post('/repos/hiimbex/testing-things/check-runs', (body) => {
-        body.completed_at = '2018-10-05T17:35:53.683Z'
+      .post('/repos/hiimbex/testing-things/check-runs', (body: any) => {
+        body.started_at = '2018-10-05T17:35:53.683Z'
         expect(body).toMatchObject(checkRunSuccess)
         return true
       })
