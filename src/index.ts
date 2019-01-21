@@ -3,23 +3,20 @@
 import Octokit from '@octokit/rest'
 import Humanize from 'humanize-plus'
 import { Application, Context } from 'probot' // eslint-disable-line no-unused-vars
-import { AnalysisResult} from './analysis-result'
+import { AnalysisResult } from './analysis-result'
 import { AnnotationResult } from './annotation-result'
-import {
-  checkDependenciesAsync,
-  getDependenciesFromJSON,
-} from './dependency-check'
+import { checkPackageFileAsync } from './dependency-check-json'
 
 const pendingChecks: any = []
 
 export = (app: Application) => {
-  app.on(['check_suite.requested'], async (context) => {
+  app.on(['check_suite.requested'], async (context: Context) => {
     await checkSuiteAsync(context, context.payload.check_suite)
   })
-  app.on(['check_suite.completed'], async (context) => {
+  app.on(['check_suite.completed'], async (context: Context) => {
     delete pendingChecks[context.payload.check_suite.head_sha]
   })
-  app.on(['check_run.rerequested'], async (context) => {
+  app.on(['check_run.rerequested'], async (context: Context) => {
     const { check_suite } = context.payload.check_run
     await checkSuiteAsync(context, check_suite)
   })
@@ -114,7 +111,6 @@ class FileItem {
 async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreateSuiteResponse) {
   try {
     const { before, head_sha: headSHA } = checkSuite
-
     const files: FileItem[] = await getFilesToBeAnalyzedAsync(context, checkSuite)
 
     context.log.info(
@@ -127,13 +123,11 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
       return
     }
 
-    const packageFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
+    const packageJsonFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
+    const gopkgFilenameRegex = /^Gopkg.toml$/g
 
     if (!check.output) {
-      const output: Octokit.ChecksUpdateParamsOutput = {
-        summary: '',
-      }
-      check.output = output
+      check.output = { summary: '' }
     }
     check.output.annotations = undefined
 
@@ -143,8 +137,8 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
       switch (file.status) {
         case 'added':
         case 'modified':
-          if (packageFilenameRegex.test(file.filename)) {
-            analysisResult.addPackageJSONFilename(file.filename)
+          if (packageJsonFilenameRegex.test(file.filename)) {
+            analysisResult.addPackageFilename(file.filename)
             await checkPackageFileAsync(analysisResult, context, file.filename, headSHA)
           }
           break
@@ -166,7 +160,7 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
             ? analysisResult.annotations.slice(annotationIndex, annotationIndex + 50)
             : analysisResult.annotations
 
-        check.output.annotations = convertAnnotationResults(check, annotationsSlice)
+        check.output.annotations = convertAnnotationResults(annotationsSlice)
         await updateRunAsync(context, check)
       }
     }
@@ -185,32 +179,21 @@ async function getFilesToBeAnalyzedAsync(
 
   try {
     if (checkSuite.before === '0000000000000000000000000000000000000000') {
-      const getCommitResponse = await context.github.repos.getCommit(
-        context.repo({
-          sha: checkSuite.head_sha,
-        }),
-      )
+      const getCommitResponse =
+        await context.github.repos.getCommit(context.repo({ sha: checkSuite.head_sha }))
       context.log.debug(
-        `get commit status: ${getCommitResponse.status}, ${
-          getCommitResponse.data.files.length
-        } file(s)`,
-      )
+        `get commit status: ${getCommitResponse.status}, ${getCommitResponse.data.files.length} file(s)`)
 
-      files = getCommitResponse.data.files.map(
-        (f: Octokit.ReposGetCommitResponseFilesItem) => new FileItem(f.filename, f.status),
-      )
+      files = getCommitResponse.data.files.map((f: Octokit.ReposGetCommitResponseFilesItem) =>
+        new FileItem(f.filename, f.status))
     } else {
-      const compareResponse = await context.github.repos.compareCommits(
-        context.repo({
-          base: checkSuite.before,
-          head: checkSuite.head_sha,
-        }),
-      )
+      const compareResponse =
+        await context.github.repos.compareCommits(context.repo({
+            base: checkSuite.before,
+            head: checkSuite.head_sha,
+          }))
       context.log.debug(
-        `compare commits status: ${compareResponse.status}, ${
-          compareResponse.data.files.length
-        } file(s)`,
-      )
+        `compare commits status: ${compareResponse.status}, ${compareResponse.data.files.length} file(s)`)
 
       files = compareResponse.data.files.map((f: any) => new FileItem(f.filename, f.status))
     }
@@ -236,40 +219,28 @@ function prepareCheckRunUpdate(check: Octokit.ChecksUpdateParams, analysisResult
     if (check.output) {
       check.output.title = 'All dependencies are good!'
       check.output.summary = `No problems detected in changes to ${Humanize.oxford(
-        analysisResult.packageJsonFilenames.map((f) => `\`${f}\``),
-        3,
-      )}`
+        analysisResult.sourceFilenames.map((f) => `\`${f}\``), 3)}`
     }
   } else {
     check.conclusion = 'failure'
 
     if (check.output) {
-      const warnings = analysisResult.annotations.filter((a) => a.annotationLevel === 'warning')
-        .length
-      const failures = analysisResult.annotations.filter((a) => a.annotationLevel === 'failure')
-        .length
-      const uniqueProblemDependencies = [
-        ...new Set(analysisResult.annotations.map((a) => a.dependency.name)),
-      ]
+      const getAnnotationCount = (level: 'notice' | 'warning' | 'failure') =>
+        analysisResult.annotations.filter((a) => a.annotationLevel === level).length
+      const warnings = getAnnotationCount('warning')
+      const failures = getAnnotationCount('failure')
+      const uniqueProblemDependencies = [ ...new Set(analysisResult.annotations.map((a) => a.dependency.name)) ]
       check.output.title = `${Humanize.boundedNumber(failures + warnings, 10)} ${Humanize.pluralize(
-        failures + warnings,
-        'problem',
+        failures + warnings, 'problem',
       )} detected`
       check.output.summary = `Checked ${analysisResult.checkedDependencyCount} ${Humanize.pluralize(
-        analysisResult.checkedDependencyCount,
-        'dependency',
-        'dependencies',
-      )} in ${Humanize.oxford(analysisResult.packageJsonFilenames.map((f) => `\`${f}\``), 3)}.
+        analysisResult.checkedDependencyCount, 'dependency', 'dependencies',
+      )} in ${Humanize.oxford(analysisResult.sourceFilenames.map((f) => `\`${f}\``), 3)}.
 ${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(
-        failures,
-        'failure',
+        failures, 'failure',
       )}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(
-        warnings,
-        'warning',
-      )} in ${Humanize.oxford(
-        uniqueProblemDependencies.map((f) => `\`${f}\``),
-        3,
-      )} need your attention!`
+        warnings, 'warning')} in ${Humanize.oxford(
+        uniqueProblemDependencies.map((f) => `\`${f}\``), 3)} need your attention!`
     }
   }
 }
@@ -304,53 +275,13 @@ async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParam
       if (--attempts <= 0) {
         throw error
       }
-      context.log.warn(
-        `error while updating check run, will try again in 30 seconds: ${error.message}`,
-      )
+      context.log.warn(`error while updating check run, will try again in 30 seconds: ${error.message}`)
       await timeout(30000)
     }
   }
 }
 
-async function checkPackageFileAsync(
-  analysisResult: AnalysisResult,
-  context: Context,
-  filename: string,
-  headSHA: string,
-) {
-  const contentsResponse: any = await context.github.repos.getContents(
-    context.repo({
-      path: filename,
-      ref: headSHA,
-    }),
-  )
-  context.log.debug(`get contents response: ${contentsResponse.status}`)
-  if (contentsResponse.status >= 300) {
-    throw new Error(
-      `HTTP error ${contentsResponse.status} (${contentsResponse.statusText}) fetching ${filename}`,
-    )
-  }
-
-  const contents = Buffer.from(contentsResponse.data.content, 'base64').toString('utf8')
-  const contentsJSON = JSON.parse(contents)
-  const doAsync = (deps: any) => {
-    return checkDependenciesAsync(
-      context,
-      contents,
-      getDependenciesFromJSON(deps),
-      filename,
-      analysisResult)
-  }
-
-  await doAsync(contentsJSON.dependencies)
-  await doAsync(contentsJSON.devDependencies)
-  await doAsync(contentsJSON.optionalDependencies)
-}
-
-function convertAnnotationResults(
-  check: Octokit.ChecksUpdateParams,
-  annotationsSlice: AnnotationResult[],
-): Octokit.ChecksUpdateParamsOutputAnnotations[] {
+function convertAnnotationResults(annotationsSlice: AnnotationResult[]): Octokit.ChecksUpdateParamsOutputAnnotations[] {
   const annotations: Octokit.ChecksUpdateParamsOutputAnnotations[] = []
 
   for (const annotationResult of annotationsSlice) {

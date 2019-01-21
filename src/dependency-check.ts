@@ -1,20 +1,8 @@
 import Octokit from '@octokit/rest'
-import { Context } from 'probot/lib/context'
+import { Context } from 'probot'
 import { AnalysisResult } from './analysis-result'
 import { AnnotationResult } from './annotation-result'
 import { Dependency } from './dependency'
-
-export function getDependenciesFromJSON(dependenciesJSON: any): Dependency[] {
-  const dependencies: Dependency[] = []
-
-  for (const name in dependenciesJSON) {
-    if (dependenciesJSON.hasOwnProperty(name)) {
-      dependencies.push({ name, url: dependenciesJSON[name] })
-    }
-  }
-
-  return dependencies
-}
 
 export async function checkDependenciesAsync(
   context: Context,
@@ -36,10 +24,10 @@ export async function checkDependenciesAsync(
   for (const dependency of dependencies) {
     const url = dependency.url
     const match = urlRegex.exec(url)
-
     if (!match) {
       continue
     }
+
     const protocol = match[1]
     const address = protocol === 'github:' ? `github.com/${match[2]}` : match[2]
     const tag = match.length > 4 ? match[4] : ''

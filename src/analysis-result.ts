@@ -2,7 +2,7 @@ import { AnnotationResult } from './annotation-result'
 
 export class AnalysisResult {
   public checkedDependencyCount!: number
-  public packageJsonFilenames: string[] = []
+  public sourceFilenames: string[] = []
   public annotations!: AnnotationResult[]
 
   constructor() {
@@ -10,7 +10,7 @@ export class AnalysisResult {
     this.annotations = []
   }
 
-  public addPackageJSONFilename(packageFilename: string) {
-    this.packageJsonFilenames.push(packageFilename)
+  public addPackageFilename(packageFilename: string) {
+    this.sourceFilenames.push(packageFilename)
   }
 }
