@@ -5,6 +5,7 @@ import Humanize from 'humanize-plus'
 import { Application, Context } from 'probot' // eslint-disable-line no-unused-vars
 import { AnalysisResult } from './analysis-result'
 import { AnnotationResult } from './annotation-result'
+import { checkGopkgFileAsync } from './dependency-check-gopkg'
 import { checkPackageFileAsync } from './dependency-check-json'
 
 const pendingChecks: any = []
@@ -120,7 +121,7 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
     }
 
     const packageJsonFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
-    const gopkgFilenameRegex = /^Gopkg.toml$/g
+    const gopkgFilenameRegex = /^(.*\/)?Gopkg\.toml$/g
 
     if (!check.output) {
       check.output = { summary: '' }
@@ -136,6 +137,13 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
           if (packageJsonFilenameRegex.test(file.filename)) {
             analysisResult.addPackageFilename(file.filename)
             await checkPackageFileAsync(analysisResult, context, file.filename, headSHA)
+          } else {
+            const match = gopkgFilenameRegex.exec(file.filename)
+            if (match) {
+              const path = match[1] ? match[1] : ''
+              analysisResult.addPackageFilename(file.filename)
+              await checkGopkgFileAsync(analysisResult, context, file.filename, `${path}Gopkg.lock`, headSHA)
+            }
           }
           break
       }
@@ -210,7 +218,10 @@ function prepareCheckRunUpdate(check: Octokit.ChecksUpdateParams, analysisResult
       check.output.title = 'No changes to dependencies'
       check.output.summary = 'No changes detected to package.json files'
     }
-  } else if (analysisResult.annotations.length === 0) {
+  } else if (analysisResult.annotations
+                           .map((a) => a.annotationLevel)
+                           .filter((l) => l === 'warning' || l === 'failure')
+                           .length === 0) {
     check.conclusion = 'success'
     if (check.output) {
       check.output.title = 'All dependencies are good!'
@@ -225,18 +236,21 @@ function prepareCheckRunUpdate(check: Octokit.ChecksUpdateParams, analysisResult
         analysisResult.annotations.filter((a) => a.annotationLevel === level).length
       const warnings = getAnnotationCount('warning')
       const failures = getAnnotationCount('failure')
+      const notices = getAnnotationCount('notice')
       const uniqueProblemDependencies = [ ...new Set(analysisResult.annotations.map((a) => a.dependency.name)) ]
-      check.output.title = `${Humanize.boundedNumber(failures + warnings, 10)} ${Humanize.pluralize(
-        failures + warnings, 'problem',
-      )} detected`
-      check.output.summary = `Checked ${analysisResult.checkedDependencyCount} ${Humanize.pluralize(
-        analysisResult.checkedDependencyCount, 'dependency', 'dependencies',
-      )} in ${Humanize.oxford(analysisResult.sourceFilenames.map((f) => `\`${f}\``), 3)}.
-${Humanize.boundedNumber(failures, 10)} ${Humanize.pluralize(
-        failures, 'failure',
-      )}, ${Humanize.boundedNumber(warnings, 10)} ${Humanize.pluralize(
-        warnings, 'warning')} in ${Humanize.oxford(
-        uniqueProblemDependencies.map((f) => `\`${f}\``), 3)} need your attention!`
+      const humanizedFilenames = Humanize.oxford(analysisResult.sourceFilenames.map((f) => `\`${f}\``), 3)
+      const problemSummary = [
+        failures > 0 ? `${failures} ${Humanize.pluralize(failures, 'failure')}` : undefined,
+        warnings > 0 ? `${warnings} ${Humanize.pluralize(warnings, 'warning')}` : undefined,
+        notices > 0 ? `${notices} ${Humanize.pluralize(notices, 'notice')}` : undefined,
+      ]
+      const humanizedProblemDeps = Humanize.oxford(uniqueProblemDependencies.map((f) => `\`${f}\``), 3)
+      const humanizeItemCount = (count: number, singular: string, plural: string) =>
+        `${Humanize.boundedNumber(count, 10)} ${Humanize.pluralize(count, singular, plural)}`
+      const humanizedDepCount = humanizeItemCount(analysisResult.checkedDependencyCount, 'dependency', 'dependencies')
+      check.output.title = `${humanizeItemCount(failures + warnings, 'problem', 'problems')} detected`
+      check.output.summary = `Checked ${humanizedDepCount} in ${humanizedFilenames}.
+${Humanize.oxford(problemSummary.filter((p) => p !== undefined))} in ${humanizedProblemDeps} need your attention!`
     }
   }
 }

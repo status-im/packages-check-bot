@@ -18,7 +18,7 @@ export class AnnotationResult {
     path: string,
     startLine: number,
     endLine: number,
-    rawDetails: string,
+    rawDetails?: string,
   ) {
     this.title = title
     this.message = message
@@ -27,6 +27,5 @@ export class AnnotationResult {
     this.path = path
     this.startLine = startLine
     this.endLine = endLine
-    this.rawDetails = rawDetails
   }
 }
