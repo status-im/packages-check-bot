@@ -13,9 +13,6 @@ export = (app: Application) => {
   app.on(['check_suite.requested'], async (context: Context) => {
     await checkSuiteAsync(context, context.payload.check_suite)
   })
-  app.on(['check_suite.completed'], async (context: Context) => {
-    delete pendingChecks[context.payload.check_suite.head_sha]
-  })
   app.on(['check_run.rerequested'], async (context: Context) => {
     const { check_suite } = context.payload.check_run
     await checkSuiteAsync(context, check_suite)
