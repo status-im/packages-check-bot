@@ -6,7 +6,8 @@
     "@types/nock": "^9.3.0",
     "humanize-plus": "^1.8.2",
     "nock": "^10.0.0",
-    "probot": "^7.2.0"
+    "probot": "^7.2.0",
+    "toml": "^2.3.5"
   },
   "description": "checks changes to packages.json to ensure that URL schemes match intended pattern and that forks are referenced with a tag, instead of a branch.",
   "devDependencies": {

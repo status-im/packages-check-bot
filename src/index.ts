@@ -5,6 +5,7 @@ import Humanize from 'humanize-plus'
 import { Application, Context } from 'probot' // eslint-disable-line no-unused-vars
 import { AnalysisResult } from './analysis-result'
 import { AnnotationResult } from './annotation-result'
+import { checkGopkgFileAsync } from './dependency-check-gopkg'
 import { checkPackageFileAsync } from './dependency-check-json'
 
 const pendingChecks: any = []
@@ -140,6 +141,9 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
           if (packageJsonFilenameRegex.test(file.filename)) {
             analysisResult.addPackageFilename(file.filename)
             await checkPackageFileAsync(analysisResult, context, file.filename, headSHA)
+          } else if (gopkgFilenameRegex.test(file.filename)) {
+            analysisResult.addPackageFilename(file.filename)
+            await checkGopkgFileAsync(analysisResult, context, file.filename, headSHA)
           }
           break
       }

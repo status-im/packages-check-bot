@@ -33,7 +33,7 @@ export async function checkDependenciesAsync(
     const tag = match.length > 4 ? match[4] : ''
     const { line } = findLineColumn(contents, contents.indexOf(url))
     const optimalAddress = address.endsWith('.git') ? address : address.concat('.git')
-    const refType = await getRefTypeAsync(context, address, tag)
+    const refType = dependency.refType ? dependency.refType : await getRefTypeAsync(context, address, tag)
     const optimalTag = refType === 'tag' ? tag : '#<release-tag>'
     const suggestedUrl = `${requiredProtocol}${optimalAddress}${optimalTag}`
 
