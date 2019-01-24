@@ -1,7 +1,9 @@
+export type GitRefType = 'commit' | 'tag' | 'branch'
+
 export interface Dependency {
   name: string
   url: string
   rawRefType?: string,
-  refType?: 'commit' | 'tag' | 'branch' | 'unknown'
+  refType?: GitRefType | undefined
   refName?: string
 }

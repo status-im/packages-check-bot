@@ -4,7 +4,31 @@ import toml from 'toml'
 import { AnalysisResult } from './analysis-result'
 import { createAnnotation } from './annotation-result'
 import { AnnotationSource } from './annotation-source'
-import { Dependency } from './dependency'
+import { Dependency, GitRefType } from './dependency'
+
+type RawGopkgRefType = 'version' | 'branch' | 'revision'
+
+interface GopkgLockProject {
+  digest: string,
+  name: string,
+  source?: string,
+  packages: string[],
+  pruneopts?: string,
+
+  revision: string,
+  branch?: string,
+  version?: string,
+}
+
+interface GopkgTomlOverride {
+  name: string,
+  source?: string,
+  metadata?: any,
+
+  revision?: string,
+  branch?: string,
+  version?: string,
+}
 
 export async function checkGopkgFileAsync(
   analysisResult: AnalysisResult,
@@ -23,46 +47,52 @@ export async function checkGopkgFileAsync(
 
   const gopkgTomlContents = Buffer.from(gopkgTomlContentsResponse.data.content, 'base64').toString('utf8')
   const gopkgLockContents = Buffer.from(gopkgLockContentsResponse.data.content, 'base64').toString('utf8')
-  const gopkgLockContentsToml = toml.parse(gopkgLockContents)
+  const gopkgTomlContentsJson = toml.parse(gopkgTomlContents)
+  const gopkgLockContentsJson = toml.parse(gopkgLockContents)
 
   await checkGoDependenciesAsync(
     gopkgTomlContents, gopkgLockContents,
-    getDependenciesFromGopkg(gopkgLockContentsToml),
+    getDependenciesFromGopkg(gopkgTomlContentsJson, gopkgLockContentsJson),
     gopkgTomlFilename, gopkgLockFilename,
     analysisResult)
 }
 
-interface GopkgLockProject {
-  digest: string,
-  name: string,
-  source?: string,
-  packages: string[],
-  pruneopts?: string,
-
-  revision: string,
-  branch?: string,
-  version?: string,
-}
-
-function getDependenciesFromGopkg(gopkgLockContentsToml: any): Dependency[] {
+function getDependenciesFromGopkg(gopkgTomlContentsJson: any, gopkgLockContentsJson: any): Dependency[] {
   const dependencies: Dependency[] = []
 
-  for (const tomlDep of gopkgLockContentsToml.projects as GopkgLockProject[]) {
-    const rawRefType = getRawRefType(tomlDep)
+  for (const tomlDep of gopkgLockContentsJson.projects as GopkgLockProject[]) {
+    const rawRefType = getRawRefType(gopkgTomlContentsJson, tomlDep)
     dependencies.push({
       name: tomlDep.name,
       url: tomlDep.source ? tomlDep.source : tomlDep.name,
 
       rawRefType,
       refName: rawRefType ? (tomlDep as any)[rawRefType] : undefined,
-      refType: getRefType(tomlDep),
+      refType: getRefType(rawRefType),
     })
   }
 
   return dependencies
 }
 
-function getRawRefType(tomlDep: GopkgLockProject): string | undefined {
+function getRawRefType(gopkgTomlContentsJson: any, tomlDep: GopkgLockProject): RawGopkgRefType | undefined {
+  const findConstraint =
+    (constraints: GopkgTomlOverride[], depName: string) =>
+      (constraints ? constraints.find((o: GopkgTomlOverride) => o.name === depName) : undefined)
+
+  const constraint: GopkgTomlOverride | undefined =
+    findConstraint(gopkgTomlContentsJson.constraint, tomlDep.name) ||
+    findConstraint(gopkgTomlContentsJson.override, tomlDep.name)
+  if (constraint) {
+    if (constraint.version) {
+      return 'version'
+    } else if (constraint.branch) {
+      return 'branch'
+    } else if (constraint.revision) {
+      return 'revision'
+    }
+  }
+
   if (tomlDep.version) {
     return 'version'
   } else if (tomlDep.branch) {
@@ -74,8 +104,8 @@ function getRawRefType(tomlDep: GopkgLockProject): string | undefined {
   return undefined
 }
 
-function getRefType(tomlDep: GopkgLockProject): 'commit' | 'tag' | 'branch' | 'unknown' {
-  switch (getRawRefType(tomlDep)) {
+function getRefType(rawRefType: RawGopkgRefType | undefined): GitRefType | undefined {
+  switch (rawRefType) {
     case 'version':
       return 'tag'
     case 'branch':
@@ -83,7 +113,7 @@ function getRefType(tomlDep: GopkgLockProject): 'commit' | 'tag' | 'branch' | 'u
     case 'revision':
       return 'commit'
     default:
-      return 'unknown'
+      return undefined
   }
 }
 

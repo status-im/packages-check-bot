@@ -1,6 +1,8 @@
 import Octokit from '@octokit/rest'
 import { Context } from 'probot'
 
+import { GitRefType } from './dependency'
+
 export function findLineInFileContent(contents: string, substring: string): number {
   const index = contents.indexOf(substring)
   if (index < 0) {
@@ -25,7 +27,7 @@ export async function slowGetRefTypeAsync(
   context: Context,
   address: string,
   tag: string,
-): Promise<'commit' | 'tag' | 'branch' | 'unknown'> {
+): Promise<GitRefType | undefined> {
   if (!tag) {
     return 'branch'
   }
@@ -65,7 +67,7 @@ export async function slowGetRefTypeAsync(
     }
 
     // probably not existing?
-    return 'unknown'
+    return undefined
   }
 
   // Educated guess

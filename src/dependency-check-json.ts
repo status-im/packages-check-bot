@@ -103,7 +103,7 @@ async function checkDependenciesAsync(
                     `${url} is not a deterministic dependency locator.
 If the branch advances, it will be impossible to rebuild the same output in the future.`,
       )
-    } else if (refType === 'unknown') {
+    } else if (refType === undefined) {
       newAnnotation('failure', `Dependency is locked with an unknown ref-spec (\`${tag}\`).`,
                     `Please check that the tag \`${tag}\` exists in the target repository ${address}.`,
       )
