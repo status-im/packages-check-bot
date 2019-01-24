@@ -1,3 +1,4 @@
+import { AnnotationSource } from './annotation-source'
 import { Dependency } from './dependency'
 
 export class AnnotationResult {
@@ -28,4 +29,23 @@ export class AnnotationResult {
     this.startLine = startLine
     this.endLine = endLine
   }
+}
+
+export function createAnnotation(
+  annotationSource: AnnotationSource,
+  annotationLevel: 'notice' | 'warning' | 'failure',
+  title: string,
+  message: string,
+): AnnotationResult {
+  const { dependency, filename, line } = annotationSource
+
+  return new AnnotationResult(
+    title,
+    message,
+    annotationLevel,
+    dependency,
+    filename,
+    line,
+    line,
+  )
 }

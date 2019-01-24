@@ -3,6 +3,7 @@
 import Octokit from '@octokit/rest'
 import Humanize from 'humanize-plus'
 import { Application, Context } from 'probot' // eslint-disable-line no-unused-vars
+
 import { AnalysisResult } from './analysis-result'
 import { AnnotationResult } from './annotation-result'
 import { checkGopkgFileAsync } from './dependency-check-gopkg'

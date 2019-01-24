@@ -1,10 +1,11 @@
 import { Context } from 'probot' // eslint-disable-line no-unused-vars
+
 import { AnalysisResult } from './analysis-result'
+import { createAnnotation } from './annotation-result'
+import { AnnotationSource } from './annotation-source'
 import { Dependency } from './dependency'
-import { AnnotationSource,
-         createAnnotation,
-         findLineInFileContent,
-         slowGetRefTypeAsync } from './dependency-check'
+import { findLineInFileContent,
+         slowGetRefTypeAsync } from './utils'
 
 export async function checkPackageFileAsync(
   analysisResult: AnalysisResult,

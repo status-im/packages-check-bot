@@ -1,10 +1,10 @@
 import { Context } from 'probot' // eslint-disable-line no-unused-vars
 import toml from 'toml'
+
 import { AnalysisResult } from './analysis-result'
+import { createAnnotation } from './annotation-result'
+import { AnnotationSource } from './annotation-source'
 import { Dependency } from './dependency'
-import { AnnotationSource,
-         createAnnotation,
-         findLineInFileContent } from './dependency-check'
 
 export async function checkGopkgFileAsync(
   analysisResult: AnalysisResult,
@@ -22,45 +22,94 @@ export async function checkGopkgFileAsync(
   context.log.debug(`get contents response for ${gopkgLockFilename}: ${gopkgLockContentsResponse.status}`)
 
   const gopkgTomlContents = Buffer.from(gopkgTomlContentsResponse.data.content, 'base64').toString('utf8')
-  const gopkgTomlContentsToml = toml.parse(gopkgTomlContents)
   const gopkgLockContents = Buffer.from(gopkgLockContentsResponse.data.content, 'base64').toString('utf8')
   const gopkgLockContentsToml = toml.parse(gopkgLockContents)
 
   await checkGoDependenciesAsync(
     gopkgTomlContents, gopkgLockContents,
-    getDependenciesFromGopkg(gopkgTomlContentsToml, gopkgLockContentsToml),
+    getDependenciesFromGopkg(gopkgLockContentsToml),
     gopkgTomlFilename, gopkgLockFilename,
     analysisResult)
 }
 
-function getDependenciesFromGopkg(gopkgTomlContentsToml: any, gopkgLockContentsToml: any): Dependency[] {
+interface GopkgLockProject {
+  digest: string,
+  name: string,
+  source?: string,
+  packages: string[],
+  pruneopts?: string,
+
+  revision: string,
+  branch?: string,
+  version?: string,
+}
+
+function getDependenciesFromGopkg(gopkgLockContentsToml: any): Dependency[] {
   const dependencies: Dependency[] = []
 
-  for (const tomlDep of gopkgLockContentsToml.projects) {
+  for (const tomlDep of gopkgLockContentsToml.projects as GopkgLockProject[]) {
+    const rawRefType = getRawRefType(tomlDep)
     dependencies.push({
       name: tomlDep.name,
       url: tomlDep.source ? tomlDep.source : tomlDep.name,
 
-      refType: getRefType(gopkgTomlContentsToml, tomlDep),
+      rawRefType,
+      refName: rawRefType ? (tomlDep as any)[rawRefType] : undefined,
+      refType: getRefType(tomlDep),
     })
   }
 
   return dependencies
 }
 
-function getRefType(gopkgTomlContentsToml: any, tomlDep: any): 'commit' | 'tag' | 'branch' | 'unknown' {
+function getRawRefType(tomlDep: GopkgLockProject): string | undefined {
   if (tomlDep.version) {
-    return 'tag'
+    return 'version'
   } else if (tomlDep.branch) {
     return 'branch'
-  } else {
-    const override: any = gopkgTomlContentsToml.override.find((o: any) => o.name === tomlDep.name)
-    if (override && override.revision) {
-      return 'commit'
-    }
+  } else if (tomlDep.revision) {
+    return 'revision'
   }
 
-  return 'unknown'
+  return undefined
+}
+
+function getRefType(tomlDep: GopkgLockProject): 'commit' | 'tag' | 'branch' | 'unknown' {
+  switch (getRawRefType(tomlDep)) {
+    case 'version':
+      return 'tag'
+    case 'branch':
+      return 'branch'
+    case 'revision':
+      return 'commit'
+    default:
+      return 'unknown'
+  }
+}
+
+interface SearchArgs {
+  projectName: string,
+  projectLineSubstring: string
+}
+
+export function findLineInTomlFileContent(contents: string, searchArgs: SearchArgs): number {
+  const projectNameIndex = contents.indexOf(searchArgs.projectName)
+  if (projectNameIndex < 0) {
+    return -1
+  }
+
+  const projectStartIndex = contents.lastIndexOf('[[', projectNameIndex)
+  if (projectStartIndex < 0) {
+    return projectNameIndex
+  }
+  const index = contents.indexOf(searchArgs.projectLineSubstring, projectStartIndex)
+  if (index < 0) {
+    return projectNameIndex
+  }
+
+  const line = contents.substr(0, index).split('\n').length
+
+  return line
 }
 
 export async function checkGoDependenciesAsync(
@@ -77,16 +126,21 @@ export async function checkGoDependenciesAsync(
   result.checkedDependencyCount += dependencies.length
 
   for (const dependency of dependencies) {
-    const url = dependency.url
-    let line = findLineInFileContent(gopkgTomlContents, `name = "${url}"`)
-    let filename = gopkgTomlFilename
-    if (line < 0) {
-      line = findLineInFileContent(gopkgLockContents, `name = "${url}"`)
-      filename = gopkgLockFilename
-    }
+    const name = dependency.name
     const refType = dependency.refType
     if (!refType) {
       continue
+    }
+
+    const searchArgs: SearchArgs = {
+      projectLineSubstring: `${dependency.rawRefType} = "${dependency.refName}"`,
+      projectName: `name = "${name}"`,
+    }
+    let line = findLineInTomlFileContent(gopkgTomlContents, searchArgs)
+    let filename = gopkgTomlFilename
+    if (line < 0) {
+      line = findLineInTomlFileContent(gopkgLockContents, searchArgs)
+      filename = gopkgLockFilename
     }
 
     const annotation: AnnotationSource = {
@@ -94,23 +148,27 @@ export async function checkGoDependenciesAsync(
       filename,
       line,
     }
-    const newAnnotation = (level: 'notice' | 'warning' | 'failure', title: string, message: string) => {
+    const newAnnotation = (level: 'notice' | 'warning' | 'failure', message: string) => {
+      const title = `Dependency '${name}' is locked with ${dependency.rawRefType} '${dependency.refName}'.`
       result.annotations.push(createAnnotation(annotation, level, title, message))
     }
     switch (refType) {
       case 'tag':
         continue
       case 'commit':
-        newAnnotation('notice', `Dependency '${url}' is not locked with a tag/release.`,
+        newAnnotation('notice',
                       `A commit SHA is not a deterministic dependency locator.
-If the commit is overwritten by a force-push, it will be impossible to rebuild the same output in the future.`,
+If the commit is overwritten by a force-push, it will be impossible to rebuild the same output in the future.
+
+Please lock the dependency with a tag/release.`,
         )
         break
       case 'branch':
         newAnnotation('notice', // TODO: change this to 'failure' once we've fixed issues in the codebase
-                      `Dependency '${url}' is not locked with a tag/release.`,
                       `A branch is not a deterministic dependency locator.
-If the branch advances, it will be impossible to rebuild the same output in the future.`,
+If the branch advances, it will be impossible to rebuild the same output in the future.
+
+Please lock the dependency with a tag/release.`,
         )
         break
     }

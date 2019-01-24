@@ -1,13 +1,5 @@
 import Octokit from '@octokit/rest'
 import { Context } from 'probot'
-import { AnnotationResult } from './annotation-result'
-import { Dependency } from './dependency'
-
-export interface AnnotationSource {
-  dependency: Dependency
-  filename: string
-  line: number
-}
 
 export function findLineInFileContent(contents: string, substring: string): number {
   const index = contents.indexOf(substring)
@@ -15,37 +7,18 @@ export function findLineInFileContent(contents: string, substring: string): numb
     return -1
   }
 
-  const lines = contents.split('\n')
   const line = contents.substr(0, index).split('\n').length
 
-  const startOfLineIndex = (() => {
-    const x = lines.slice(0)
-    x.splice(line - 1)
-    return x.join('\n').length + (x.length > 0 ? 1 : 0)
-  })()
+  // const lines = contents.split('\n')
+  // const startOfLineIndex = (() => {
+  //   const x = lines.slice(0)
+  //   x.splice(line - 1)
+  //   return x.join('\n').length + (x.length > 0 ? 1 : 0)
+  // })()
 
-  const col = index - startOfLineIndex
+  // const col = index - startOfLineIndex
 
   return line
-}
-
-export function createAnnotation(
-  annotationSource: AnnotationSource,
-  annotationLevel: 'notice' | 'warning' | 'failure',
-  title: string,
-  message: string,
-): AnnotationResult {
-  const { dependency, filename, line } = annotationSource
-
-  return new AnnotationResult(
-    title,
-    message,
-    annotationLevel,
-    dependency,
-    filename,
-    line,
-    line,
-  )
 }
 
 export async function slowGetRefTypeAsync(
