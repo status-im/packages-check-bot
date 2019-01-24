@@ -179,14 +179,14 @@ export async function checkGoDependenciesAsync(
       line,
     }
     const newAnnotation = (level: 'notice' | 'warning' | 'failure', message: string) => {
-      const title = `Dependency '${name}' is locked with ${dependency.rawRefType} '${dependency.refName}'.`
+      const title = `Dependency "${name}" is locked with ${dependency.rawRefType} '${dependency.refName}'.`
       result.annotations.push(createAnnotation(annotation, level, title, message))
     }
     switch (refType) {
       case 'tag':
         continue
       case 'commit':
-        newAnnotation('notice',
+        newAnnotation(name.startsWith('github.com/status-im/') ? 'warning' : 'notice',
                       `A commit SHA is not a deterministic dependency locator.
 If the commit is overwritten by a force-push, it will be impossible to rebuild the same output in the future.
 
@@ -194,7 +194,7 @@ Please lock the dependency with a tag/release.`,
         )
         break
       case 'branch':
-        newAnnotation('notice', // TODO: change this to 'failure' once we've fixed issues in the codebase
+        newAnnotation('failure',
                       `A branch is not a deterministic dependency locator.
 If the branch advances, it will be impossible to rebuild the same output in the future.
 
