@@ -152,7 +152,6 @@ export async function checkGoDependenciesAsync(
     return
   }
 
-  // tslint:disable-next-line:max-line-length
   result.checkedDependencyCount += dependencies.length
 
   for (const dependency of dependencies) {

@@ -36,9 +36,8 @@ export = (app: Application) => {
     })
 
     try {
-      context.log.info(`checking ${context.payload.repository.html_url}/commits/${
-        checkSuite.head_sha
-      } (check_suite.id #${checkSuite.id})
+      context.log.info(
+        `checking ${context.payload.repository.html_url}/commits/${headSHA} (check_suite.id #${checkSuite.id})
 Pull requests: ${Humanize.oxford(checkSuite.pull_requests.map((pr) => pr.url), 5)}`)
 
       check.status = 'in_progress'
@@ -153,7 +152,7 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
     prepareCheckRunUpdate(check, analysisResult)
 
     if (analysisResult.annotations.length === 0) {
-      await updateRunAsync(context, check)
+      await updateRunAsync(context, check, headSHA)
     } else {
       for (
         let annotationIndex = 0;
@@ -166,7 +165,7 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
             : analysisResult.annotations
 
         check.output.annotations = convertAnnotationResults(annotationsSlice)
-        await updateRunAsync(context, check)
+        await updateRunAsync(context, check, headSHA)
       }
     }
     delete pendingChecks[headSHA]
@@ -256,7 +255,8 @@ ${Humanize.oxford(problemSummary.filter((p) => p !== undefined))} in ${humanized
   }
 }
 
-async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParams) {
+async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParams,
+                              headSHA: string) {
   for (let attempts = 3; attempts >= 0; ) {
     try {
       const updateResponse = await context.github.checks.update({
@@ -277,9 +277,9 @@ async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParam
         status: check.status,
       })
       context.log.info(
-        `HTTP ${updateResponse.status} - Finished updating check run #${check.check_run_id} for ${
-          context.payload.repository.html_url
-        }/commits/${context.payload.check_suite.head_sha}: ${check.status}, ${check.conclusion}`,
+        `HTTP ${updateResponse.status} - Finished updating check run ${
+          context.payload.repository.html_url}/runs/${check.check_run_id} for ${
+          context.payload.repository.html_url}/commits/${headSHA}: ${check.status}, ${check.conclusion}`,
       )
       break
     } catch (error) {
