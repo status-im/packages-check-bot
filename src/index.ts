@@ -12,7 +12,7 @@ import { checkPackageFileAsync } from './dependency-check-json'
 const pendingChecks: any = []
 
 export = (app: Application) => {
-  app.on(['check_suite.requested'], async (context: Context) => {
+  app.on(['check_suite.requested', 'check_suite.rerequested'], async (context: Context) => {
     await checkSuiteAsync(context, context.payload.check_suite)
   })
   app.on(['check_run.rerequested'], async (context: Context) => {
