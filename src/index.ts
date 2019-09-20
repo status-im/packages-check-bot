@@ -120,7 +120,7 @@ async function queueCheckAsync(context: Context, checkSuite: Octokit.ChecksCreat
       return
     }
 
-    const packageJsonFilenameRegex = /^(.*\/)?package\.json(.orig)?$/g
+    const packageJsonFilenameRegex = /^^(?:[\w\-\. ]+\/)*package\.json(.orig)?$/g
     const gopkgFilenameRegex = /^(.*\/)?Gopkg\.toml$/g
 
     if (!check.output) {
