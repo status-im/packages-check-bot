@@ -71,8 +71,11 @@ Pull requests: ${Humanize.oxford(checkSuite.pull_requests.map((pr) => pr.url), 5
         return createResponse
       }
     } catch (e) {
+      /* Error of unknown type has to be handled */
+      if (!(e instanceof Error)) {
+        throw e
+      }
       context.log.error(e)
-
       // Report error back to GitHub
       check.status = 'completed'
       check.conclusion = 'cancelled'
@@ -286,7 +289,9 @@ async function updateRunAsync(context: Context, check: Octokit.ChecksUpdateParam
       if (--attempts <= 0) {
         throw error
       }
-      context.log.warn(`error while updating check run, will try again in 30 seconds: ${error.message}`)
+      if (error instanceof Error) {
+        context.log.warn(`error while updating check run, will try again in 30 seconds: ${error.message}`)
+      }
       await timeout(30000)
     }
   }
