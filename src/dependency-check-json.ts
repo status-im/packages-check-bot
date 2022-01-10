@@ -58,7 +58,7 @@ async function checkDependenciesAsync(
   }
 
   // tslint:disable-next-line:max-line-length
-  const urlRegex = /^(http:\/\/|https:\/\/|git\+http:\/\/|git\+https:\/\/|ssh:\/\/|git\+ssh:\/\/|github:)([a-zA-Z0-9_\-./]+)(#(.*))?$/gm
+  const urlRegex = /^(http:\/\/|https:\/\/|git\+http:\/\/|git\+https:\/\/|ssh:\/\/|git\+ssh:\/\/|github:)([a-zA-Z0-9_\-./]+)(#(?:refs\/tags\/)?(.*))?$/gm
   const requiredProtocol = 'git+https://'
 
   result.checkedDependencyCount += dependencies.length
